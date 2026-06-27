@@ -231,12 +231,28 @@ async def chat(request: ChatRequest):
     rag_context = ""
     if user_id:
         try:
-            retriever = get_user_retriever(user_id, k=5)
-            relevant_docs = retriever.invoke(request.message)
-            logger.info(f"[chat] RAG retrieved {len(relevant_docs)} docs for user {user_id}")
-            if relevant_docs:
-                rag_chunks = "\n".join(f"- {doc.page_content}" for doc in relevant_docs)
-                rag_context = f"Relevant expense records (retrieved by semantic search):\n{rag_chunks}"
+            # If user wants all expenses — fetch directly from DB, skip RAG
+            list_keywords = ["list all", "all expenses", "all my expenses", "show all", "every expense", "all spending"]
+            is_list_all = any(kw in request.message.lower() for kw in list_keywords)
+
+            if is_list_all:
+                all_expenses = _fetch_expenses_from_db(user_id)
+                if all_expenses:
+                    expense_lines = "\n".join(
+                        f"- {e.get('Description','N/A')}: ₹{e.get('Amount', 0)} "
+                        f"({e.get('Category','N/A')}) on {str(e.get('ExpenseDate',''))[:10]}"
+                        for e in all_expenses
+                    )
+                    rag_context = f"All user expenses:\n{expense_lines}"
+                    logger.info(f"[chat] List-all detected, fetched {len(all_expenses)} expenses from DB")
+            else:
+                retriever = get_user_retriever(user_id, k=5)
+                relevant_docs = retriever.invoke(request.message)
+                logger.info(f"[chat] RAG retrieved {len(relevant_docs)} docs for user {user_id}")
+                if relevant_docs:
+                    rag_chunks = "\n".join(f"- {doc.page_content}" for doc in relevant_docs)
+                    rag_context = f"Relevant expense records (retrieved by semantic search):\n{rag_chunks}"
+
         except Exception as e:
             logger.warning(f"[chat] RAG retrieval failed, falling back to inline: {e}")
 
